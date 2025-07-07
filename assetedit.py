@@ -33,7 +33,7 @@ class AssetEditPage:
         self.bill_display = ft.Image(width=50, height=50, fit="contain")
         self.bill_warning_text = ft.Text("", color="red")
 
-        # Initialize attached_images and attached_bills as empty lists
+        # Initialize attributes as empty lists
         self.attached_images = []
         self.attached_bills = []
 
@@ -84,6 +84,7 @@ class AssetEditPage:
             cursor.close()
 
     def handle_asset_image(self, e: ft.FilePickerResultEvent):
+        print(f"handle_asset_image called with event: {e}, files: {e.files}")  # Enhanced debug
         self.attached_images = e.files if e.files else []
         self.asset_image_button.text = f"{len(self.attached_images)} image(s) selected."
         self.image_display.src_base64 = None
@@ -91,26 +92,31 @@ class AssetEditPage:
         if self.attached_images:
             file = self.attached_images[0]
             try:
-                if not self.page.web and hasattr(file, 'path'):
+                if file and hasattr(file, 'bytes'):
+                    self.attached_image_bytes = file.bytes
+                    self.image_display.src_base64 = base64.b64encode(self.attached_image_bytes).decode('utf-8')
+                    self.warning_text.value = "Image selected successfully (mobile)."
+                    print(f"Image bytes length: {len(self.attached_image_bytes)}")
+                elif not self.page.web and hasattr(file, 'path'):
                     with open(file.path, "rb") as f:
                         self.attached_image_bytes = f.read()
                     self.image_display.src_base64 = base64.b64encode(self.attached_image_bytes).decode('utf-8')
                     self.warning_text.value = "Image selected successfully."
                 else:
-                    # Handle mobile case where path might not be available
-                    if file and hasattr(file, 'bytes'):
-                        self.attached_image_bytes = file.bytes
-                        self.image_display.src_base64 = base64.b64encode(self.attached_image_bytes).decode('utf-8')
-                        self.warning_text.value = "Image selected successfully (mobile)."
-                    else:
-                        self.warning_text.value = "Failed to load image on mobile."
+                    self.warning_text.value = "No file data available. Check storage permissions."
+                    print(f"File object details: {vars(file) if file else 'None'}")
             except Exception as ex:
                 self.warning_text.value = f"Error reading file: {ex}"
-            self.image_display.update()
+                print(f"Exception in handle_asset_image: {ex}")
+        else:
+            self.warning_text.value = "No files selected. Ensure storage permissions are granted."
+            print("No files selected in handle_asset_image")
+        self.image_display.update()
         self.warning_text.update()
         self.page.update()
 
     def handle_bill_image(self, e: ft.FilePickerResultEvent):
+        print(f"handle_bill_image called with event: {e}, files: {e.files}")  # Enhanced debug
         self.attached_bills = e.files if e.files else []
         self.asset_bill_button.text = f"{len(self.attached_bills)} bill(s) selected."
         self.bill_display.src_base64 = None
@@ -118,21 +124,26 @@ class AssetEditPage:
         if self.attached_bills:
             file = self.attached_bills[0]
             try:
-                if not self.page.web and hasattr(file, 'path'):
+                if file and hasattr(file, 'bytes'):
+                    self.attached_bill_bytes = file.bytes
+                    self.bill_display.src_base64 = base64.b64encode(self.attached_bill_bytes).decode('utf-8')
+                    self.bill_warning_text.value = "Bill selected successfully (mobile)."
+                    print(f"Bill bytes length: {len(self.attached_bill_bytes)}")
+                elif not self.page.web and hasattr(file, 'path'):
                     with open(file.path, "rb") as f:
                         self.attached_bill_bytes = f.read()
                     self.bill_display.src_base64 = base64.b64encode(self.attached_bill_bytes).decode('utf-8')
                     self.bill_warning_text.value = "Bill selected successfully."
                 else:
-                    if file and hasattr(file, 'bytes'):
-                        self.attached_bill_bytes = file.bytes
-                        self.bill_display.src_base64 = base64.b64encode(self.attached_bill_bytes).decode('utf-8')
-                        self.bill_warning_text.value = "Bill selected successfully (mobile)."
-                    else:
-                        self.bill_warning_text.value = "Failed to load bill on mobile."
+                    self.bill_warning_text.value = "No file data available. Check storage permissions."
+                    print(f"File object details: {vars(file) if file else 'None'}")
             except Exception as ex:
                 self.bill_warning_text.value = f"Error reading file: {ex}"
-            self.bill_display.update()
+                print(f"Exception in handle_bill_image: {ex}")
+        else:
+            self.bill_warning_text.value = "No files selected. Ensure storage permissions are granted."
+            print("No files selected in handle_bill_image")
+        self.bill_display.update()
         self.bill_warning_text.update()
         self.page.update()
 
@@ -183,30 +194,31 @@ class AssetEditPage:
             cursor.execute("UPDATE assets SET location = ? WHERE id = ?", (self.asset_location.value or "", self.asset_id))
             print(f"Updated location for asset_id {self.asset_id} to {self.asset_location.value}")
 
+            # Handle image update with safety check
             if self.attached_images and hasattr(self, 'attached_image_bytes'):
-                # Find the existing image for this asset_id
                 cursor.execute("SELECT id, image_name FROM asset_images WHERE asset_id = ? LIMIT 1", (self.asset_id,))
                 existing_image = cursor.fetchone()
-                img_name = os.path.basename(self.attached_images[0].name) if self.attached_images else "updated_image.jpg"
+                img_name = os.path.basename(self.attached_images[0].name) if self.attached_images and self.attached_images[0].name else "updated_image.jpg"
                 if existing_image:
                     image_id, existing_name = existing_image
-                    # Update the existing image with the new data
                     cursor.execute("""
                         UPDATE asset_images SET image_data = ?, image_name = ?, last_sync = ? WHERE id = ?
                     """, (self.attached_image_bytes, img_name, time.strftime("%Y-%m-%d %H:%M:%S"), image_id))
                     print(f"Updated existing image {img_name} for asset_id {self.asset_id} with id {image_id}")
                 else:
-                    # Insert new image only if no existing image found
                     cursor.execute("""
                         INSERT INTO asset_images (asset_id, image_name, image_data, last_sync)
                         VALUES (?, ?, ?, ?)
                     """, (self.asset_id, img_name, self.attached_image_bytes, time.strftime("%Y-%m-%d %H:%M:%S")))
                     print(f"Inserted new image {img_name} for asset_id {self.asset_id}")
+            else:
+                print("No attached images to process or attached_image_bytes not set")
 
+            # Handle bill update with safety check
             if self.attached_bills and hasattr(self, 'attached_bill_bytes'):
                 cursor.execute("SELECT id, bill_name FROM asset_bills WHERE asset_id = ? LIMIT 1", (self.asset_id,))
                 existing_bill = cursor.fetchone()
-                bill_name = os.path.basename(self.attached_bills[0].name) if self.attached_bills else "updated_bill.pdf"
+                bill_name = os.path.basename(self.attached_bills[0].name) if self.attached_bills and self.attached_bills[0].name else "updated_bill.pdf"
                 if existing_bill:
                     bill_id, existing_name = existing_bill
                     cursor.execute("""
@@ -217,6 +229,8 @@ class AssetEditPage:
                         INSERT INTO asset_bills (asset_id, bill_name, bill_data, last_sync)
                         VALUES (?, ?, ?, ?)
                     """, (self.asset_id, bill_name, self.attached_bill_bytes, time.strftime("%Y-%m-%d %H:%M:%S")))
+            else:
+                print("No attached bills to process or attached_bill_bytes not set")
 
             self.local_db.commit()
             # Show success popup before closing the dialog
